@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HIT AND RUN — حاسبة الربحية</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light;--bg:#fff;--card:#fff;--line:#bbb;--tx:#000;--mu:#555;--or:#000;--gr:#000;--rd:#000;--inp:#fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:Cairo,Tahoma,sans-serif;font-size:15px}
+header{padding:14px 16px;border-bottom:3px solid var(--or);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px}
+h1{margin:0;font-size:24px;font-weight:800;letter-spacing:1px}h1 b{color:var(--or)}
+
+nav{display:flex;gap:4px;padding:8px 12px;overflow-x:auto;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;color:var(--mu);font:inherit;padding:6px 12px;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent}
+nav button.on{color:var(--tx);border-color:var(--or)}
+main{padding:14px;max-width:1100px;margin:auto}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+label{display:block;font-size:13px}label small{display:block;color:var(--mu);font-size:11px}
+input,select,textarea{width:100%;background:var(--inp);color:var(--tx);border:1px solid #000;border-radius:4px;padding:6px 8px;font:inherit;direction:ltr;text-align:right}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;margin:12px 0;overflow-x:auto}
+h2{font-size:16px;margin:0 0 8px;color:var(--or)}
+table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+td.n{direction:ltr;font-variant-numeric:tabular-nums}.neg{font-weight:800}.mu{color:var(--mu);font-size:12px}
+.big{font-size:28px;font-weight:800}.k{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.k div{background:#f2f2f2;border-radius:4px;padding:8px;border-right:3px solid var(--or)}
+button.b{background:#000;color:#fff;border:0;padding:7px 14px;border-radius:4px;font:inherit;font-weight:600;cursor:pointer}
+.bar{height:10px;background:var(--or);display:inline-block}.warn{font-weight:800}
+</style></head><body>
+<header><h1>HIT <b>AND</b> RUN</h1></header>
+<nav id="nav"></nav><main id="app"></main>
+
+<script id="engine">
+const DEF={n:0,price:0,disc:0,units:1,cost:0,conf:0,shipRate:100,deliv:0,ret:0,resell:100,failLoss:0,ad:0,shipOK:0,shipFail:0,shipRet:0,call:0,pack:0,other:0,fee:0,feeBase:"del",over:0};
+// ===== Financial engine (pure functions) =====
+function calc(i){
+  const n=i.n,u=i.units,pn=i.price*(1-i.disc/100),conf=i.conf/100,shp=i.shipRate/100,dv=i.deliv/100,r=i.ret/100,rs=i.resell/100;
+  const o={n,pn};
+  o.created=n;o.confirmed=n*conf;o.shipped=o.confirmed*shp;o.delivered=o.shipped*dv;o.failed=o.shipped-o.delivered;
+  o.returned=o.delivered*r;o.retained=o.delivered-o.returned;
+  o.revG=o.delivered*u*pn;o.revN=o.retained*u*pn;
+  o.cogsDelivered=o.delivered*u*i.cost;
+  // COGS consumed: retained units + unsellable share of returns + damage on failed shipments
+  o.cogs=o.retained*u*i.cost+o.returned*u*i.cost*(1-rs)+o.failed*u*i.cost*i.failLoss/100;
+  o.ads=n*i.ad;o.ship=o.delivered*i.shipOK+o.failed*i.shipFail;o.shipRet=o.returned*i.shipRet;
+  o.ops=n*i.call+o.shipped*i.pack+o.delivered*i.other;
+  o.fee=i.fee/100*(i.feeBase==='net'?o.revN:o.revG);
+  o.varCost=o.cogs+o.ads+o.ship+o.shipRet+o.ops+o.fee;
+  o.contribution=o.revN-o.varCost;o.overhead=i.over;o.profit=o.contribution-i.over;
+  o.costs=o.varCost+i.over; // ROI denominator = total costs
+  const d=(a,b)=>b>0?a/b:null;
+  o.roi=d(o.profit,o.costs);o.margin=d(o.profit,o.revN);
+  o.ppCreated=d(o.profit,n);o.ppDelivered=d(o.profit,o.delivered);o.ppRetained=d(o.profit,o.retained);
+  o.cpoCreated=d(o.ads,o.created);o.cpoDelivered=d(o.ads,o.delivered);o.cpoRetained=d(o.ads,o.retained);
+  o.aov=d(o.revG,o.delivered);o.roasNet=d(o.revN,o.ads);o.roasGross=d(o.revG,o.ads);
+  o.preAd=o.profit+o.ads; // profit if ad spend were zero
+  o.beRoas=o.preAd>0?d(o.revN,o.preAd):null;
+  return o;
+}
+// profit is exactly linear in net price -> a*pn+b (fee base, returns, discounts all linear)
+function lin(i){const g=p=>calc({...i,price:p,disc:0}).profit;const b=g(0);return{a:g(1)-b,b}}
+function solvePrice(i,type,v){
+  const {a,b}=lin(i),c=calc(i),R=c.retained,u=i.units;
+  let pn;
+  if(R<=0)return{err:'لا توجد طلبات محتفظ بها (بيانات غير كافية)'};
+  if(type==='egp')pn=(v*R-b)/a;
+  else{const m=type==='roi'?v/(1+v):v; // profit=k*(Rev-profit) => margin=k/(1+k)
+    const den=a-m*R*u;if(den<=1e-12)return{err:'الهدف غير قابل للتحقق بالافتراضات الحالية'};pn=-b/den;}
+  if(type==='egp'&&a<=1e-12)return{err:'الهدف غير قابل للتحقق بالافتراضات الحالية'};
+  if(!isFinite(pn)||pn<0)return{err:'الهدف غير قابل للتحقق بالافتراضات الحالية'};
+  const chk=calc({...i,price:pn,disc:0}),tgt=type==='egp'?v*R:(type==='roi'?v/(1+v):v)*chk.revN;
+  return{pn,resid:chk.profit-tgt};
+}
+function targetProfit(i,type,v){const c=calc(i);return type==='egp'?v*c.retained:(type==='roi'?v/(1+v):v)*c.revN}
+function rootLin(f){const f0=f(0),f1=f(1);if(f0===f1)return null;const x=-f0/(f1-f0);return x>=0&&x<=1?x:null}
+function validate(i){const e=[];for(const k in i){if(k==='feeBase')continue;if(typeof i[k]!=='number'||isNaN(i[k]))e.push(k+': قيمة ناقصة');else if(i[k]<0)e.push(k+': قيمة سالبة');}
+ ['conf','shipRate','deliv','ret','resell','failLoss','disc','fee'].forEach(k=>{if(i[k]>100)e.push(k+': أكبر من 100%')});return e}
+const REF={n:100,price:999,disc:0,units:1,cost:440,conf:70,shipRate:100,deliv:70,ret:0,resell:100,failLoss:0,ad:110,shipOK:100,shipFail:70,shipRet:0,call:0,pack:0,other:0,fee:1,feeBase:'del',over:0};
+function runTests(){
+  const T=[],ok=(m,c,d)=>T.push({m,pass:!!c,d}),near=(a,b)=>Math.abs(a-b)<1e-6;
+  let c=calc(REF);
+  ok('اختبار 1: 70 مؤكد/49 مسلم/21 فاشل',near(c.confirmed,70)&&near(c.delivered,49)&&near(c.failed,21),[c.confirmed,c.delivered,c.failed]);
+  ok('اختبار 1: مبيعات 48,951 وتكلفة 21,560',near(c.revG,48951)&&near(c.cogs,21560));
+  ok('اختبار 1: إعلانات 11,000 وشحن 6,370 ورسوم 489.51',near(c.ads,11000)&&near(c.ship,6370)&&near(c.fee,489.51));
+  ok('اختبار 1: الربح 9,531.49',near(c.profit,9531.49),c.profit);
+  const B={...REF,price:700,cost:225,conf:60,deliv:60,ad:100};c=calc(B);
+  ok('اختبار 2: 60/36/24',near(c.confirmed,60)&&near(c.delivered,36)&&near(c.failed,24));
+  ok('اختبار 2: 25,200 / 8,100 / 10,000 / 5,280 / 252',near(c.revG,25200)&&near(c.cogs,8100)&&near(c.ads,10000)&&near(c.ship,5280)&&near(c.fee,252));
+  ok('اختبار 2: الربح 1,568',near(c.profit,1568),c.profit);
+  c=calc({...REF,n:0});ok('صفر طلبات: لا NaN والنسب غير متاحة',c.profit===0&&c.ppRetained===null&&c.roi===null);
+  c=calc({...REF,ad:0});ok('إعلان صفر: ROAS غير متاح',c.roasNet===null&&c.profit>0);
+  c=calc({...REF,deliv:0});ok('تسليم 0%: لا إيراد وخسارة',c.revN===0&&c.profit<0&&c.ppDelivered===null);
+  c=calc({...REF,conf:0});ok('تأكيد 0%: الخسارة = الإعلانات فقط',near(c.profit,-11000));
+  c=calc({...REF,deliv:100});ok('تسليم 100%: لا فاشل',c.failed===0);
+  c=calc({...REF,ret:100});ok('مرتجع 100% قابل لإعادة البيع: لا إيراد ولا تكلفة منتج',c.revN===0&&c.cogs===0);
+  c=calc({...REF,ret:100,resell:0});ok('مرتجع 100% غير صالح: تكلفة المنتج تُحتسب',near(c.cogs,21560));
+  c=calc({...REF,cost:1200});ok('تكلفة أعلى من السعر: ربح سالب',c.profit<0);
+  ok('قيم سالبة/ناقصة تُرفض',validate({...REF,cost:-1}).length===1&&validate({...REF,ad:NaN}).length===1);
+  c=calc({...REF,conf:33.3,deliv:77.7});ok('طلبات كسرية متوقعة مقبولة',!Number.isInteger(c.delivered)&&isFinite(c.profit),c.delivered);
+  c=calc({...REF,disc:10,fee:2.5,units:2});ok('خصم+رسوم%+وحدتان: إيراد=ن×2×899.1',near(c.revG,49*2*899.1)&&near(c.fee,.025*c.revG));
+  const x=calc({...REF,ret:10,resell:50,failLoss:5,shipRet:40,pack:15,call:5});
+  ok('محاسبة المرتجعات: الاحتفاظ=90% من المسلم',near(x.retained,x.delivered*.9));
+  let s=solvePrice(B,'egp',0);ok('سعر التعادل: الربح ≈ 0 عند السعر المحسوب',!s.err&&near(calc({...B,price:s.pn,disc:0}).profit,0),s.pn);
+  s=solvePrice(B,'margin',.15);ok('سعر لهامش 15%: يتحقق',!s.err&&near(calc({...B,price:s.pn,disc:0}).margin,.15),s.pn);
+  s=solvePrice(B,'roi',.3);ok('سعر لعائد 30% (على إجمالي التكاليف): يتحقق',!s.err&&near(calc({...B,price:s.pn,disc:0}).roi,.3),s.pn);
+  s=solvePrice({...B,fee:100},'margin',.2);ok('هدف مستحيل يُعلن صراحة',!!s.err);
+  const p1=calc(B).profit,p2=calc({...B,conf:50}).profit,p3=calc({...B,ad:150}).profit;
+  ok('تغيير الإدخالات يحدّث النتائج',p2<p1&&p3<p1&&near(p3,p1-5000));
+  return T;
+}
+</script>
+
+<script>
+// ===== UI =====
+const FD=[['n','عدد الطلبات المنشأة','Created orders',''],['price','سعر البيع للوحدة','Selling price','ج.م'],['disc','خصم متوقع','Discount','%'],['units','وحدات لكل طلب','Units/order',''],['cost','تكلفة الوحدة','Unit cost','ج.م'],
+['conf','نسبة التأكيد (من المنشأة)','Confirmation rate','%'],['shipRate','نسبة الشحن (من المؤكد)','Shipment rate','%'],['deliv','نسبة التسليم (من المشحون)','Delivery rate','%'],['ret','مرتجع بعد التسليم (من المسلّم)','Post-delivery return','%'],['resell','نسبة المرتجع القابل للبيع','Resellable returns','%'],['failLoss','تلف/فقد في الشحنة الفاشلة (من التكلفة)','Failed-shipment loss','%'],
+['ad','تكلفة الإعلان لكل طلب منشأ','Ad cost / created order','ج.م'],['shipOK','شحن ناجح (لكل مسلّم)','Delivery shipping','ج.م'],['shipFail','رسوم فاشل/مرتجع شحن (لكل فاشل)','Failed / RTO fee','ج.م'],['shipRet','شحن مرتجع بعد التسليم (لكل مرتجع)','Post-delivery return ship','ج.م'],
+['call','تأكيد/كول سنتر (لكل طلب منشأ)','Confirmation / order','ج.م'],['pack','تغليف وتجهيز (لكل شحنة)','Packaging / shipment','ج.م'],['other','تكاليف متغيرة أخرى (لكل مسلّم)','Other variable / delivered','ج.م'],['fee','رسوم تحصيل/تحويل','COD / transfer fee','%'],['over','مصاريف تشغيل ثابتة للفترة (مرة واحدة)','Fixed overhead','ج.م']];
+const TABS=['الحاسبة','التسعير','السيناريوهات','الحساسية','الاختبارات','الدليل والحدود'];
+let tab=0,S;
+try{S=JSON.parse(localStorage.getItem('har_v2'))}catch(e){}
+if(!S||!S.i){S={i:{...DEF},tg:{t:'egp',v:0}}}
+const sc0=()=>({cons:{},opt:{}});
+if(!S.sc)S.sc=sc0();
+const save=()=>{try{localStorage.setItem('har_v2',JSON.stringify(S))}catch(e){}};
+const f=x=>x==null||!isFinite(x)?'<span class=mu>غير متاح</span>':x.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const pc=x=>x==null||!isFinite(x)?'<span class=mu>غير متاح</span>':(x*100).toFixed(2)+'%';
+const cl=x=>x==null?'':x>0?'pos':x<0?'neg':'';
+const row=(a,b,v,c)=>`<tr><td>${a}<span class=mu> ${b||''}</span></td><td class="n ${c||''}">${v}</td></tr>`;
+const P=m=>calc({...S.i,...m}).profit;
+
+function inputs(){return '<div class=g>'+FD.map(([k,a,e,u])=>`<label>${a}<small>${e} ${u}</small><input type=number step=any data-k="${k}" value="${S.i[k]||''}" placeholder="0"></label>`).join('')+
+`<label>أساس رسوم التحصيل<small>Fee base</small><select data-k=feeBase><option value=del ${S.i.feeBase=='del'?'selected':''}>إيراد المسلّم (قبل المرتجع)</option><option value=net ${S.i.feeBase=='net'?'selected':''}>الإيراد الصافي المحتفظ به</option></select></label></div>`}
+
+function calcTab(){const c=calc(S.i),er=validate(S.i);
+ return `<div class=card><h2>المدخلات</h2>${inputs()}${er.length?'<p class=warn>تحذير: '+er.join(' | ')+'</p>':''}</div><div id=res></div>`}
+function resTab(){const c=calc(S.i),i=S.i;
+ const lab=c.profit>0?'مربح بالافتراضات الحالية (توقّع — ليس ربحًا مثبتًا)':'غير مربح بالافتراضات الحالية';
+ return `<div class=card><h2>النتيجة المتوقعة <span class=mu>(توقعات بأعداد كسرية، لا بيانات فعلية)</span></h2><div class=k>
+ <div><span class=mu>صافي الربح التشغيلي</span><div class="big ${cl(c.profit)}">${f(c.profit)}</div></div>
+ <div><span class=mu>الهامش على الإيراد الصافي</span><div class="big ${cl(c.margin)}">${pc(c.margin)}</div></div>
+ <div><span class=mu>العائد على إجمالي التكاليف (ROI)</span><div class="big ${cl(c.roi)}">${pc(c.roi)}</div></div>
+ <div><span class=mu>ROAS صافي / تعادل</span><div class=big>${c.roasNet==null?'—':c.roasNet.toFixed(2)} / ${c.beRoas==null?'—':c.beRoas.toFixed(2)}</div></div></div>
+ <p><b>${i.n>0?lab:'أدخل عدد الطلبات وباقي البيانات لتظهر النتائج'}</b></p><p class=mu>ROI = صافي الربح ÷ (كل التكاليف: منتج + إعلان + شحن + رسوم + تشغيل). ROAS التعادل = الإيراد الصافي ÷ الربح قبل الإعلان.</p></div>
+ <div class=g><div class=card><h2>القمع (Funnel)</h2><table>${row('منشأ','Created',c.created.toFixed(2))+row('مؤكد','÷ منشأ',c.confirmed.toFixed(2))+row('مشحون','÷ مؤكد',c.shipped.toFixed(2))+row('مسلّم','÷ مشحون',c.delivered.toFixed(2))+row('فاشل','',c.failed.toFixed(2))+row('مرتجع بعد التسليم','÷ مسلّم',c.returned.toFixed(2))+row('محتفظ به','Retained',c.retained.toFixed(2))}</table></div>
+ <div class=card><h2>الأرباح والتكاليف (ج.م)</h2><table>${row('إيراد المسلّم (إجمالي)','Gross',f(c.revG))+row('إيراد صافي محتفظ به','Net retained',f(c.revN))+row('تكلفة المنتج المستهلكة','COGS',f(-c.cogs),'neg')+row('الإعلانات','',f(-c.ads),'neg')+row('الشحن + الفاشل','',f(-c.ship),'neg')+row('شحن مرتجع بعد التسليم','',f(-c.shipRet),'neg')+row('تأكيد/تغليف/أخرى','',f(-c.ops),'neg')+row('رسوم التحصيل','',f(-c.fee),'neg')+row('ربح المساهمة','Contribution',f(c.contribution),cl(c.contribution))+row('مصاريف ثابتة','',f(-c.overhead),'neg')+row('صافي الربح التشغيلي','',f(c.profit),cl(c.profit))}</table></div>
+ <div class=card><h2>لكل وحدة</h2><table>${row('ربح لكل طلب منشأ','',f(c.ppCreated),cl(c.ppCreated))+row('ربح لكل طلب مسلّم','',f(c.ppDelivered),cl(c.ppDelivered))+row('ربح لكل طلب محتفظ به','',f(c.ppRetained),cl(c.ppRetained))+row('تكلفة إعلان/منشأ','',f(c.cpoCreated))+row('تكلفة إعلان/مسلّم','',f(c.cpoDelivered))+row('تكلفة إعلان/محتفظ به','',f(c.cpoRetained))+row('متوسط قيمة الطلب AOV','',f(c.aov))}</table></div></div>
+ <div class=card><h2>نقل البيانات (نسخ احتياطي)</h2><textarea id=bk rows=3>${JSON.stringify(S.i)}</textarea><p><button class=b id=imp>استيراد من النص أعلاه</button> <button class=b id=rst>مسح كل البيانات</button></p></div>`}
+
+function pricingTab(){const c=calc(S.i),t=S.tg,v=t.t==='egp'?t.v:t.v/100;
+ const s=solvePrice(S.i,t.t,v),be=solvePrice(S.i,'egp',0);
+ const tp=targetProfit(S.i,t.t,v),P0=c.preAd,maxT=P0-tp;
+ const disc=s.err?null:1-s.pn/S.i.price*1;
+ const msg=e=>`<span class=warn>${e}</span>`;
+ const prices=[.8,.9,1,1.1,1.2].map(m=>{const p=S.i.price*m;return`<tr><td class=n>${p.toFixed(0)}</td><td class="n ${cl(P({price:p}))}">${f(P({price:p}))}</td></tr>`}).join('');
+ return `<div class=card><h2>الهدف</h2><div class=g><label>نوع الهدف<select id=tt><option value=egp ${t.t=='egp'?'selected':''}>ج.م ربح لكل طلب محتفظ به</option><option value=margin ${t.t=='margin'?'selected':''}>هامش % على الإيراد الصافي</option><option value=roi ${t.t=='roi'?'selected':''}>ROI % (على إجمالي التكاليف)</option></select></label><label>القيمة<input type=number step=any id=tv value="${t.v}"></label></div></div>
+ <div class=card><h2>النتائج (حل دقيق للمعادلة الخطية في السعر)</h2><table>
+ ${row('سعر التعادل (صافي بعد الخصم)','Break-even',be.err?msg(be.err):f(be.pn))}
+ ${row('السعر المطلوب للهدف (صافي بعد الخصم)','',s.err?msg(s.err):f(s.pn))}
+ ${row('أقصى خصم من سعر البيع الحالي مع تحقيق الهدف','',s.err?msg(s.err):disc<0?msg('السعر الحالي أقل من المطلوب — الهدف غير متحقق'):(disc*100).toFixed(2)+'%')}
+ ${row('أقصى تكلفة إعلان لكل منشأ','',maxT<0?msg('غير ممكن بهذه الافتراضات'):f(maxT/c.created))}
+ ${row('أقصى تكلفة إعلان لكل مسلّم','',maxT<0||c.delivered<=0?msg('غير ممكن/غير متاح'):f(maxT/c.delivered))}
+ ${row('أقصى تكلفة إعلان لكل محتفظ به','',maxT<0||c.retained<=0?msg('غير ممكن/غير متاح'):f(maxT/c.retained))}
+ ${row('ROAS التعادل','',c.beRoas==null?msg('غير ممكن'):c.beRoas.toFixed(2))}
+ ${row('أقل نسبة تأكيد للتعادل','',(x=>x==null?msg('لا يوجد تعادل ضمن 0–100%'):(x*100).toFixed(1)+'%')(rootLin(x=>P({conf:x*100}))))}
+ ${row('أقل نسبة تسليم للتعادل','',(x=>x==null?msg('لا يوجد تعادل ضمن 0–100%'):(x*100).toFixed(1)+'%')(rootLin(x=>P({deliv:x*100}))))}
+ ${row('تحقق: فرق الحل عن الهدف (يجب ≈ 0)','',s.err?'—':s.resid.toExponential(2))}</table>
+ <p class=mu>لا يتم تعديل أي مدخل تلقائيًا. التسعير يشمل الرسوم كنسبة من الإيراد والشحن الفاشل والمرتجعات.</p></div>
+ <div class=card><h2>الربح عند أسعار مختلفة</h2><table><tr><th>سعر البيع</th><th>صافي الربح</th></tr>${prices}</table></div>`}
+
+const SCF=[['price','سعر البيع'],['cost','تكلفة الوحدة'],['ad','إعلان/منشأ'],['conf','تأكيد %'],['deliv','تسليم %'],['ret','مرتجع %'],['shipOK','شحن ناجح'],['shipFail','رسوم فاشل'],['units','وحدات/طلب']];
+function scenTab(){const cols=[['محافظ','cons'],['متوقع (الأساس)','exp'],['متفائل','opt']];
+ const get=k=>k==='exp'?S.i:{...S.i,...S.sc[k]},cs=cols.map(([,k])=>calc(get(k)));
+ const inp=SCF.map(([k,a])=>`<tr><td>${a}</td>${cols.map(([,s])=>`<td>${s==='exp'?`<span class=n>${S.i[k]}</span>`:`<input type=number step=any data-s="${s}" data-k="${k}" value="${S.sc[s][k]??''}" placeholder="${S.i[k]}">`}</td>`).join('')}</tr>`).join('');
+ const out=[['مسلّم',c=>c.delivered.toFixed(1)],['محتفظ به',c=>c.retained.toFixed(1)],['إيراد صافي',c=>f(c.revN)],['إجمالي التكاليف',c=>f(c.costs)],['صافي الربح',c=>`<b class=${cl(c.profit)}>${f(c.profit)}</b>`],['الهامش',c=>pc(c.margin)],['ROI',c=>pc(c.roi)],['ROAS التعادل',c=>c.beRoas==null?'—':c.beRoas.toFixed(2)]].map(([a,g])=>`<tr><td>${a}</td>${cs.map(c=>`<td class=n>${g(c)}</td>`).join('')}</tr>`).join('');
+ return `<div class=card><h2>السيناريوهات (باقي المدخلات من الحاسبة — الخلية الفارغة = نفس قيمة الأساس)</h2><table><tr><th></th>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr>${inp}<tr><td colspan=4 class=mu>النتائج</td></tr>${out}</table><p><button class=b id=scr>مسح تعديلات السيناريوهات</button></p></div>`}
+
+function sensTab(){const b=S.i,cf=[0,-5,-10,-20],ad=[0,10,20,30],dl=[0,-5,-10,-20],rt=[0,5,10,20];
+ const cell=p=>`<td class="n ${cl(p)}">${f(p)}</td>`;
+ const t1=`<table><tr><th>تأكيد ↓ / إعلان ↑</th>${ad.map(a=>`<th>+${a}%</th>`).join('')}</tr>${cf.map(x=>`<tr><td>${x} نقطة</td>${ad.map(a=>cell(P({conf:Math.max(0,b.conf+x),ad:b.ad*(1+a/100)}))).join('')}</tr>`).join('')}</table>`;
+ const t2=`<table><tr><th>تسليم ↓ / مرتجع ↑</th>${rt.map(a=>`<th>+${a} نقطة</th>`).join('')}</tr>${dl.map(x=>`<tr><td>${x} نقطة</td>${rt.map(a=>cell(P({deliv:Math.max(0,b.deliv+x),ret:Math.min(100,b.ret+a)}))).join('')}</tr>`).join('')}</table>`;
+ const D=[['سعر البيع ±10%',{price:b.price*.9},{price:b.price*1.1}],['تكلفة المنتج ±10%',{cost:b.cost*1.1},{cost:b.cost*.9}],['تكلفة الإعلان ±10%',{ad:b.ad*1.1},{ad:b.ad*.9}],['التأكيد ±10 نقاط',{conf:b.conf-10},{conf:Math.min(100,b.conf+10)}],['التسليم ±10 نقاط',{deliv:b.deliv-10},{deliv:Math.min(100,b.deliv+10)}],['المرتجع ±5 نقاط',{ret:Math.min(100,b.ret+5)},{ret:Math.max(0,b.ret-5)}],['الشحن الناجح ±10%',{shipOK:b.shipOK*1.1},{shipOK:b.shipOK*.9}]].map(([a,x,y])=>({a,lo:P(x),hi:P(y)})).map(o=>({...o,sp:Math.abs(o.hi-o.lo)})).sort((p,q)=>q.sp-p.sp);
+ const mx=D[0].sp||1;
+ return `<div class=card><h2>الأثر على صافي الربح (ج.م)</h2>${t1}<br>${t2}</div><div class=card><h2>أكبر الافتراضات تأثيرًا (من الأعلى)</h2><table>${D.map(o=>`<tr><td>${o.a}</td><td class=n>${f(o.sp)}</td><td><span class=bar style="width:${(o.sp/mx*160).toFixed(0)}px"></span></td></tr>`).join('')}</table></div>`}
+
+function testTab(){const T=runTests(),p=T.filter(t=>t.pass).length;
+ return `<div class=card><h2>نتائج الاختبارات الآلية (تُنفَّذ الآن في متصفحك): ${p}/${T.length}</h2><table>${T.map(t=>`<tr><td>${t.m}</td><td class="${t.pass?'pos':'neg'}">${t.pass?'نجح':'فشل'}</td></tr>`).join('')}</table></div>`}
+
+function helpTab(){return `<div class=card><h2>دليل سريع</h2>
+<p><b>الحاسبة:</b> عدّل الحقول؛ كل النتائج تتحدث فورًا وتُحفظ تلقائيًا في المتصفح. <b>التسعير:</b> اختر هدفك (ج.م/هامش/ROI) لتحصل على السعر المطلوب وأقصى خصم وأقصى تكلفة إعلان. <b>السيناريوهات:</b> قارن محافظ/متوقع/متفائل. <b>الحساسية:</b> اعرف أي افتراض يؤثر أكثر. النسخ الاحتياطي: انسخ النص من أسفل الحاسبة واحفظه، واستورده لاحقًا.</p></div>
+<div class=card><h2>النموذج المالي</h2><p class=mu style="white-space:normal;line-height:1.9">مؤكد = منشأ×التأكيد؛ مشحون = مؤكد×نسبة الشحن؛ مسلّم = مشحون×التسليم؛ فاشل = مشحون−مسلّم؛ مرتجع = مسلّم×نسبة المرتجع؛ محتفظ به = مسلّم−مرتجع.<br>الإيراد الصافي = محتفظ×وحدات×(السعر×(1−الخصم)).<br>تكلفة المنتج المستهلكة = محتفظ×وحدات×التكلفة + مرتجع×وحدات×التكلفة×(1−نسبة القابل للبيع) + فاشل×وحدات×التكلفة×نسبة التلف. المنتج المرتجع القابل للبيع يعود للمخزون ولا يُحتسب مصروفًا.<br>الإعلان = منشأ×تكلفة الإعلان. الشحن = مسلّم×شحن ناجح + فاشل×رسوم الفاشل (+ مرتجع×شحن المرتجع). التأكيد لكل منشأ، التغليف لكل شحنة، "أخرى" لكل مسلّم. الرسوم% على إيراد المسلّم أو الصافي حسب الاختيار.<br>ربح المساهمة = الإيراد الصافي − كل التكاليف المتغيرة؛ صافي الربح = المساهمة − المصاريف الثابتة (تُخصم مرة واحدة). الهامش = الربح÷الإيراد الصافي. ROI = الربح÷إجمالي التكاليف (هذا هو مقام ROI، ويطابق شيت المرجع: 24.18%). ROAS = الإيراد الصافي÷الإنفاق؛ ROAS التعادل = الإيراد الصافي÷الربح قبل الإعلان.<br>الربح خطي تمامًا في السعر، لذلك تُحل أسعار التعادل والأهداف بمعادلة دقيقة ثم يُتحقق منها بإعادة الحساب.</p></div>
+<div class=card><h2>حدود معروفة (غير منفذة بعد)</h2><p class=mu style="white-space:normal;line-height:1.9">لم تُبنَ بعد: لوحة التنفيذ بالفلاتر، تتبع الأداء الفعلي وCSV، مقارنة عدة منتجات وقرارات التوسع بحد أدنى للبيانات، المخزون ورأس المال العامل، وحدة الإعلانات بالإسناد. لا يوجد ربط بـ Meta أو شركات الشحن. الضرائب غير محتسبة (غير مخترعة). الأسعار والرسوم كلها افتراضات قابلة للتعديل وليست بيانات حقيقية. الربح هنا توقع لا ربح مثبت.</p></div>`}
+
+function show(){const R=[calcTab,pricingTab,scenTab,sensTab,testTab,helpTab];
+ document.getElementById('nav').innerHTML=TABS.map((t,i)=>`<button class="${i==tab?'on':''}" data-t="${i}">${t}</button>`).join('');
+ document.getElementById('app').innerHTML=R[tab]();if(tab==0)upd();bind()}
+function upd(){const e=document.getElementById('res');if(e){e.innerHTML=resTab();bindRes()}}
+function bindRes(){const i=document.getElementById('imp');if(i)i.onclick=()=>{try{const o=JSON.parse(document.getElementById('bk').value);if(validate({...DEF,...o}).length)throw 0;S.i={...DEF,...o};save();show()}catch(e){alert('بيانات غير صالحة')}};
+ const r=document.getElementById('rst');if(r)r.onclick=()=>{if(!confirm('مسح كل البيانات؟'))return;S.i={...DEF};S.sc=sc0();save();show()}}
+function bind(){document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=+b.dataset.t;show()});
+ document.querySelectorAll('input[data-k],select[data-k]').forEach(el=>el.oninput=()=>{const k=el.dataset.k;if(el.dataset.s){const o=S.sc[el.dataset.s];if(el.value==='')delete o[k];else o[k]=+el.value}else S.i[k]=k==='feeBase'?el.value:(el.value===''?0:+el.value);save();if(tab==0)upd();else if(tab==2){/* keep focus */}});
+ const tt=document.getElementById('tt'),tv=document.getElementById('tv');
+ if(tt)tt.onchange=()=>{S.tg.t=tt.value;save();show()};if(tv)tv.onchange=()=>{S.tg.v=+tv.value;save();show()};
+ const sr=document.getElementById('scr');if(sr)sr.onclick=()=>{S.sc=sc0();save();show()};
+ document.querySelectorAll('input[data-s]').forEach(el=>el.onchange=show)}
+show();
+</script></body></html>
